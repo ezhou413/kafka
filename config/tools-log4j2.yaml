@@ -29,4 +29,6 @@ Configuration:
       level: WARN
       AppenderRef:
         - ref: STDERR
-
+    Logger:
+      - name: org.apache.kafka.clients.consumer.internals
+        level: DEBUG

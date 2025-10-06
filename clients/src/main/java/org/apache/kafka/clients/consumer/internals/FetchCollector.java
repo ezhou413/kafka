@@ -188,8 +188,10 @@ public class FetchCollector<K, V> {
                 }
 
                 Long partitionLag = subscriptions.partitionLag(tp, fetchConfig.isolationLevel);
-                if (partitionLag != null)
+                if (partitionLag != null) {
                     metricsManager.recordPartitionLag(tp, partitionLag);
+                    log.debug("current partition lag is {}", partitionLag);
+                }
 
                 Long lead = subscriptions.partitionLead(tp);
                 if (lead != null) {

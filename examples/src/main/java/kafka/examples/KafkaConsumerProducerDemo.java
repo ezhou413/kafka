@@ -51,18 +51,23 @@ public class KafkaConsumerProducerDemo {
             Utils.recreateTopics(KafkaProperties.BOOTSTRAP_SERVERS, -1, TOPIC_NAME);
             CountDownLatch latch = new CountDownLatch(2);
 
+            // stage 3: consume records from topic1
+            Consumer consumerThread = new Consumer(
+                    "consumer", KafkaProperties.BOOTSTRAP_SERVERS, TOPIC_NAME, GROUP_NAME, Optional.empty(), false, numRecords, latch);
+
             // stage 2: produce records to topic1
             Producer producerThread = new Producer(
                 "producer", KafkaProperties.BOOTSTRAP_SERVERS, TOPIC_NAME, isAsync, null, false, numRecords, -1, latch);
+
+            // record time right before we start the producer and consumer
+            Utils.printOut("Starting KafkaConsumerProducerDemo at " + System.currentTimeMillis());
+            Utils.printErr("Starting KafkaConsumerProducerDemo at " + System.currentTimeMillis());
+            consumerThread.start();
             producerThread.start();
 
-            // stage 3: consume records from topic1
-            Consumer consumerThread = new Consumer(
-                "consumer", KafkaProperties.BOOTSTRAP_SERVERS, TOPIC_NAME, GROUP_NAME, Optional.empty(), false, numRecords, latch);
-            consumerThread.start();
-
-            if (!latch.await(5, TimeUnit.MINUTES)) {
-                Utils.printErr("Timeout after 5 minutes waiting for termination");
+            if (!latch.await(10, TimeUnit.MINUTES)) {
+                Utils.printOut("Timeout after 10 minutes waiting for termination");
+                Utils.printErr("Timeout after 10 minutes waiting for termination");
                 producerThread.shutdown();
                 consumerThread.shutdown();
             }

@@ -145,6 +145,14 @@ public class Consumer extends Thread implements ConsumerRebalanceListener {
         }
         // sets the reset offset policy in case of invalid or no offset
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+
+        String groupProtocol = "consumer";
+        props.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, groupProtocol);
+
+//        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1);
+//        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 5);
+
+        System.out.println("group protocol: " + groupProtocol);
         return new KafkaConsumer<>(props);
     }
 

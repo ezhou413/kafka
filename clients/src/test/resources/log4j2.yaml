@@ -31,8 +31,8 @@ Configuration:
       AppenderRef:
         - ref: STDOUT
     Logger:
-      - name: org.apache.kafka
-        level: ERROR
+      - name: org.apache.kafka.clients.consumer
+        level: DEBUG
       # We are testing for a particular INFO log message in CommonNameLoggingTrustManagerFactoryWrapper
       - name: org.apache.kafka.common.security.ssl.CommonNameLoggingTrustManagerFactoryWrapper
         level: INFO
