@@ -167,7 +167,7 @@ def _plot(classic: Dict[str, List[Tuple[float, int]]], consumer: Dict[str, List[
         print("matplotlib is required to plot. Install with: pip install matplotlib", file=sys.stderr)
         raise
 
-    fig, axes = plt.subplots(5, 1, figsize=(12, 15), sharex=True)
+    fig, axes = plt.subplots(8, 1, figsize=(12, 22), sharex=True)
 
     def _draw(ax, key: str, ylabel: str):
         x_c, y_c = zip(*classic[key]) if classic[key] else ([], [])
@@ -196,7 +196,7 @@ def _plot(classic: Dict[str, List[Tuple[float, int]]], consumer: Dict[str, List[
 
     _draw_count(axes[3])
 
-    # Inter-update time gaps for HWM and Offset
+    # Inter-update time gaps for HWM and Offset (separate subplots)
     def _gaps(points: List[Tuple[float, int]]):
         if not points or len(points) < 2:
             return ([], [])
@@ -210,31 +210,42 @@ def _plot(classic: Dict[str, List[Tuple[float, int]]], consumer: Dict[str, List[
             prev_t = t
         return times, deltas
 
-    def _draw_update_gaps(ax):
-        # classic series
-        x_ch, y_ch = _gaps(classic.get("hwm", []))
-        x_co, y_co = _gaps(classic.get("offset", []))
-        # consumer series
-        x_nh, y_nh = _gaps(consumer.get("hwm", []))
-        x_no, y_no = _gaps(consumer.get("offset", []))
+    # Compute gaps for each series
+    x_ch, y_ch = _gaps(classic.get("hwm", []))
+    x_co, y_co = _gaps(classic.get("offset", []))
+    x_nh, y_nh = _gaps(consumer.get("hwm", []))
+    x_no, y_no = _gaps(consumer.get("offset", []))
 
-        if x_ch:
-            ax.plot(x_ch, y_ch, label="classic HWM Δt", color="tab:blue", linewidth=1.6, linestyle="-")
-        if x_co:
-            ax.plot(x_co, y_co, label="classic offset Δt", color="tab:blue", linewidth=1.6, linestyle="--")
-        if x_nh:
-            ax.plot(x_nh, y_nh, label="consumer HWM Δt", color="tab:orange", linewidth=1.6, linestyle="-")
-        if x_no:
-            ax.plot(x_no, y_no, label="consumer offset Δt", color="tab:orange", linewidth=1.6, linestyle="--")
+    # classic HWM Δt
+    if x_ch:
+        axes[4].plot(x_ch, y_ch, label="classic HWM Δt", color="tab:blue", linewidth=1.6, linestyle="-")
+    axes[4].set_ylabel("Δt (s)")
+    axes[4].grid(True, linestyle=":", linewidth=0.8, alpha=0.7)
+    axes[4].legend(loc="best")
 
-        ax.set_ylabel("Δt (s)")
-        ax.grid(True, linestyle=":", linewidth=0.8, alpha=0.7)
-        ax.legend(loc="best")
+    # classic offset Δt
+    if x_co:
+        axes[5].plot(x_co, y_co, label="classic offset Δt", color="tab:blue", linewidth=1.6, linestyle="--")
+    axes[5].set_ylabel("Δt (s)")
+    axes[5].grid(True, linestyle=":", linewidth=0.8, alpha=0.7)
+    axes[5].legend(loc="best")
 
-    _draw_update_gaps(axes[4])
+    # consumer HWM Δt
+    if x_nh:
+        axes[6].plot(x_nh, y_nh, label="consumer HWM Δt", color="tab:orange", linewidth=1.6, linestyle="-")
+    axes[6].set_ylabel("Δt (s)")
+    axes[6].grid(True, linestyle=":", linewidth=0.8, alpha=0.7)
+    axes[6].legend(loc="best")
 
-    axes[4].set_xlabel("Time since start (s)")
-    fig.suptitle("Classic vs Consumer: Lag, HWM, Offset, Lag-Line Count, Update Δt")
+    # consumer offset Δt
+    if x_no:
+        axes[7].plot(x_no, y_no, label="consumer offset Δt", color="tab:orange", linewidth=1.6, linestyle="--")
+    axes[7].set_ylabel("Δt (s)")
+    axes[7].grid(True, linestyle=":", linewidth=0.8, alpha=0.7)
+    axes[7].legend(loc="best")
+
+    axes[7].set_xlabel("Time since start (s)")
+    fig.suptitle("Classic vs Consumer: Lag, HWM, Offset, Lag-Line Count, Update Δt (split)")
     fig.tight_layout(rect=[0, 0.03, 1, 0.97])
     fig.savefig(out_path, dpi=150)
     print(f"Saved plot → {out_path}")

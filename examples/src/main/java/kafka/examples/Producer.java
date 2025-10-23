@@ -88,6 +88,8 @@ public class Producer extends Thread {
                 key++;
                 sentRecords++;
             }
+            // Ensure all buffered records are sent before closing the producer
+            producer.flush();
         } catch (Throwable e) {
             Utils.printErr("Unhandled exception");
             e.printStackTrace();

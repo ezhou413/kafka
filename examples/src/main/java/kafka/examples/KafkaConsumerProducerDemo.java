@@ -62,8 +62,10 @@ public class KafkaConsumerProducerDemo {
             // record time right before we start the producer and consumer
             Utils.printOut("Starting KafkaConsumerProducerDemo at " + System.currentTimeMillis());
             Utils.printErr("Starting KafkaConsumerProducerDemo at " + System.currentTimeMillis());
-            consumerThread.start();
             producerThread.start();
+
+            consumerThread.start();
+
 
             if (!latch.await(10, TimeUnit.MINUTES)) {
                 Utils.printOut("Timeout after 10 minutes waiting for termination");

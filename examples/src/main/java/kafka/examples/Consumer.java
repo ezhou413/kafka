@@ -146,7 +146,7 @@ public class Consumer extends Thread implements ConsumerRebalanceListener {
         // sets the reset offset policy in case of invalid or no offset
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
-        String groupProtocol = "consumer";
+        String groupProtocol = "classic";
         props.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, groupProtocol);
 
 //        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1);
