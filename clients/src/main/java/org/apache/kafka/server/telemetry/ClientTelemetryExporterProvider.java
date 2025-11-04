@@ -14,21 +14,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.clients.consumer.internals.events;
 
-import org.apache.kafka.common.PartitionInfo;
+package org.apache.kafka.server.telemetry;
 
-import java.util.List;
-import java.util.Map;
+import org.apache.kafka.common.metrics.MetricsReporter;
 
-public abstract class AbstractTopicMetadataEvent extends CompletableApplicationEvent<Map<String, List<PartitionInfo>>> implements MetadataErrorNotifiableEvent {
+/**
+ * A {@link MetricsReporter} may implement this interface to indicate support for collecting client
+ * telemetry on the server side using the new exporter API.
+ */
+public interface ClientTelemetryExporterProvider {
 
-    protected AbstractTopicMetadataEvent(final Type type, final long deadlineMs) {
-        super(type, deadlineMs);
-    }
-
-    @Override
-    public void onMetadataError(Exception metadataError) {
-        future().completeExceptionally(metadataError);
-    }
+    /**
+     * Called by the broker to fetch instance of {@link ClientTelemetryExporter}.
+     * <p>
+     * This instance may be cached by the broker.
+     *
+     * @return broker side instance of {@link ClientTelemetryExporter}
+     */
+    ClientTelemetryExporter clientTelemetryExporter();
 }

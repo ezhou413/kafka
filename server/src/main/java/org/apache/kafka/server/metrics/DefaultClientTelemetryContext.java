@@ -14,21 +14,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.kafka.clients.consumer.internals.events;
+package org.apache.kafka.server.metrics;
 
-import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.server.authorizer.AuthorizableRequestContext;
+import org.apache.kafka.server.telemetry.ClientTelemetryContext;
 
-import java.util.List;
-import java.util.Map;
+/**
+ * Default implementation of {@link ClientTelemetryContext}.
+ */
+public record DefaultClientTelemetryContext(int pushIntervalMs,
+                                            AuthorizableRequestContext authorizableRequestContext) implements ClientTelemetryContext {
 
-public abstract class AbstractTopicMetadataEvent extends CompletableApplicationEvent<Map<String, List<PartitionInfo>>> implements MetadataErrorNotifiableEvent {
-
-    protected AbstractTopicMetadataEvent(final Type type, final long deadlineMs) {
-        super(type, deadlineMs);
-    }
-
-    @Override
-    public void onMetadataError(Exception metadataError) {
-        future().completeExceptionally(metadataError);
-    }
 }
