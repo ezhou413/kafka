@@ -292,7 +292,7 @@ class OffsetFetcherUtils {
             if (subscriptionState.isAssigned(partition)) {
                 final long offset = entry.getValue().offset;
                 if (isolationLevel == IsolationLevel.READ_COMMITTED) {
-                    log.trace("Updating last stable offset for partition {} to {}", partition, offset);
+                    log.error("**************** Updating last stable offset for partition {} to {}", partition, offset);
                     subscriptionState.updateLastStableOffset(partition, offset);
                 } else {
                     log.trace("Updating high watermark for partition {} to {}", partition, offset);

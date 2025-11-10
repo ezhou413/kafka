@@ -181,7 +181,7 @@ public class FetchCollector<K, V> {
                             nextInLineFetch.nextFetchOffset(),
                             nextInLineFetch.lastEpoch(),
                             position.currentLeader);
-                    log.trace("Updating fetch position from {} to {} for partition {} and returning {} records from `poll()`",
+                    log.error("%%%%%%%%%%%%%%%%% Updating fetch position from {} to {} for partition {} and returning {} records from `poll()`",
                             position, nextPosition, tp, partRecords.size());
                     subscriptions.position(tp, nextPosition);
                     positionAdvanced = true;
@@ -190,7 +190,7 @@ public class FetchCollector<K, V> {
                 Long partitionLag = subscriptions.partitionLag(tp, fetchConfig.isolationLevel);
                 if (partitionLag != null) {
                     metricsManager.recordPartitionLag(tp, partitionLag);
-                    log.debug("current partition lag is {}", partitionLag);
+//                    log.debug("current partition lag is {}", partitionLag);
                 }
 
                 Long lead = subscriptions.partitionLead(tp);
@@ -296,7 +296,7 @@ public class FetchCollector<K, V> {
         }
 
         if (partitionData.lastStableOffset() >= 0) {
-            log.trace("Updating last stable offset for partition {} to {}", tp, partitionData.lastStableOffset());
+            log.error("$$$$$$$$$$$$$$ Updating last stable offset for partition {} to {}", tp, partitionData.lastStableOffset());
             if (!subscriptions.tryUpdatingLastStableOffset(tp, partitionData.lastStableOffset())) {
                 return false;
             }

@@ -149,8 +149,8 @@ public class Consumer extends Thread implements ConsumerRebalanceListener {
         String groupProtocol = "classic";
         props.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, groupProtocol);
 
-//        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1);
-//        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 5);
+        props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 1);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 5);
 
         System.out.println("group protocol: " + groupProtocol);
         return new KafkaConsumer<>(props);

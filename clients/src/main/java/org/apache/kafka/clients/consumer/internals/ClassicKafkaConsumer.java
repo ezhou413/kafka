@@ -153,6 +153,14 @@ public class ClassicKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
     // to keep from repeatedly scanning subscriptions in poll(), cache the result during metadata updates
     private boolean cachedSubscriptionHasAllFetchPositions;
 
+    private long pollTimeMs;
+    private long pollForFetchesTimeMs;
+    private long pollBlockTimeMs;
+
+    private int pollCount;
+    private int pollForFetchesCount;
+    private int pollBlockCount;
+
     ClassicKafkaConsumer(ConsumerConfig config, Deserializer<K> keyDeserializer, Deserializer<V> valueDeserializer) {
         try {
             GroupRebalanceConfig groupRebalanceConfig = new GroupRebalanceConfig(config,
@@ -628,6 +636,9 @@ public class ClassicKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
      * @throws KafkaException if the rebalance callback throws exception
      */
     private ConsumerRecords<K, V> poll(final Timer timer) {
+        pollCount++;
+        long curTime = time.milliseconds();
+
         acquireAndEnsureOpen();
         try {
             this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs());
@@ -667,6 +678,9 @@ public class ClassicKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
         } finally {
             release();
             this.kafkaConsumerMetrics.recordPollEnd(timer.currentTimeMs());
+            long endTime = time.milliseconds();
+
+            pollTimeMs += endTime - curTime;
         }
     }
 
@@ -687,36 +701,51 @@ public class ClassicKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
      * @throws KafkaException if the rebalance callback throws exception
      */
     private Fetch<K, V> pollForFetches(Timer timer) {
-        long pollTimeout = coordinator == null ? timer.remainingMs() :
-                Math.min(coordinator.timeToNextPoll(timer.currentTimeMs()), timer.remainingMs());
+        pollForFetchesCount++;
+        long curTime = time.milliseconds();
+        try {
+            long pollTimeout = coordinator == null ? timer.remainingMs() :
+                    Math.min(coordinator.timeToNextPoll(timer.currentTimeMs()), timer.remainingMs());
 
-        // if data is available already, return it immediately
-        final Fetch<K, V> fetch = fetcher.collectFetch();
-        if (!fetch.isEmpty()) {
-            return fetch;
+            // if data is available already, return it immediately
+            final Fetch<K, V> fetch = fetcher.collectFetch();
+            if (!fetch.isEmpty()) {
+                return fetch;
+            }
+
+            // send any new fetches (won't resend pending fetches)
+            sendFetches();
+
+            // We do not want to be stuck blocking in poll if we are missing some positions
+            // since the offset lookup may be backing off after a failure
+
+            // NOTE: the use of cachedSubscriptionHasAllFetchPositions means we MUST call
+            // updateAssignmentMetadataIfNeeded before this method.
+            if (!cachedSubscriptionHasAllFetchPositions && pollTimeout > retryBackoffMs) {
+                pollTimeout = retryBackoffMs;
+            }
+
+            log.trace("Polling for fetches with timeout {}", pollTimeout);
+
+            pollBlockCount++;
+            long curTimeBlock = time.milliseconds();
+            try {
+                Timer pollTimer = time.timer(pollTimeout);
+                client.poll(pollTimer, () -> {
+                    // since a fetch might be completed by the background thread, we need this poll condition
+                    // to ensure that we do not block unnecessarily in poll()
+                    return !fetcher.hasAvailableFetches();
+                });
+                timer.update(pollTimer.currentTimeMs());
+            }
+            finally {
+                long endTimeBlock = time.milliseconds();
+                pollBlockTimeMs += endTimeBlock - curTimeBlock;
+            }
+        } finally {
+            long endTime = time.milliseconds();
+            pollForFetchesTimeMs += endTime - curTime;
         }
-
-        // send any new fetches (won't resend pending fetches)
-        sendFetches();
-
-        // We do not want to be stuck blocking in poll if we are missing some positions
-        // since the offset lookup may be backing off after a failure
-
-        // NOTE: the use of cachedSubscriptionHasAllFetchPositions means we MUST call
-        // updateAssignmentMetadataIfNeeded before this method.
-        if (!cachedSubscriptionHasAllFetchPositions && pollTimeout > retryBackoffMs) {
-            pollTimeout = retryBackoffMs;
-        }
-
-        log.trace("Polling for fetches with timeout {}", pollTimeout);
-
-        Timer pollTimer = time.timer(pollTimeout);
-        client.poll(pollTimer, () -> {
-            // since a fetch might be completed by the background thread, we need this poll condition
-            // to ensure that we do not block unnecessarily in poll()
-            return !fetcher.hasAvailableFetches();
-        });
-        timer.update(pollTimer.currentTimeMs());
 
         return fetcher.collectFetch();
     }
@@ -1120,6 +1149,7 @@ public class ClassicKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
 
     @Override
     public void close(CloseOptions option) {
+        log.error("pollTimeMs: {}, pollCount: {}, pollForFetchesTimeMs : {}, pollForFetchesCount: {}, pollBlockTimeMs: {}, pollBlockCount: {}", pollTimeMs, pollCount, pollForFetchesTimeMs, pollForFetchesCount, pollBlockTimeMs, pollBlockCount);
         Duration timeout = option.timeout().orElseGet(() -> Duration.ofMillis(DEFAULT_CLOSE_TIMEOUT_MS));
         if (timeout.toMillis() < 0)
             throw new IllegalArgumentException("The timeout cannot be negative.");

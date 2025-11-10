@@ -339,6 +339,13 @@ public class AsyncKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
     private final AtomicLong currentThread = new AtomicLong(NO_CURRENT_THREAD);
     private final AtomicInteger refCount = new AtomicInteger(0);
 
+    private long pollTimeMs;
+    private long pollForFetchesTimeMs;
+    private long pollBlockTimeMs;
+    private int pollCount;
+    private int pollForFetchesCount;
+    private int pollBlockCount;
+
     private final MemberStateListener memberStateListener = new MemberStateListener() {
         @Override
         public void onMemberEpochUpdated(Optional<Integer> memberEpoch, String memberId) {
@@ -824,6 +831,8 @@ public class AsyncKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
      */
     @Override
     public ConsumerRecords<K, V> poll(final Duration timeout) {
+        pollCount++;
+        long curTime = time.milliseconds();
         Timer timer = time.timer(timeout);
 
         acquireAndEnsureOpen();
@@ -871,6 +880,9 @@ public class AsyncKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
         } finally {
             kafkaConsumerMetrics.recordPollEnd(timer.currentTimeMs());
             release();
+            long endTime = time.milliseconds();
+
+            pollTimeMs += endTime - curTime;
         }
     }
 
@@ -1448,6 +1460,8 @@ public class AsyncKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
 
     @Override
     public void close(CloseOptions option) {
+        log.error("pollTimeMs: {}, pollCount: {}, pollForFetchesTimeMs : {}, pollForFetchesCount: {}, pollBlockTimeMs: {}, pollBlockCount: {}", pollTimeMs, pollCount, pollForFetchesTimeMs, pollForFetchesCount, pollBlockTimeMs, pollBlockCount);
+
         Duration timeout = option.timeout().orElseGet(() -> Duration.ofMillis(DEFAULT_CLOSE_TIMEOUT_MS));
 
         if (timeout.toMillis() < 0)
@@ -1860,58 +1874,70 @@ public class AsyncKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
     }
 
     private Fetch<K, V> pollForFetches(Timer timer) {
-        long pollTimeout = isCommittedOffsetsManagementEnabled()
-                ? Math.min(applicationEventHandler.maximumTimeToWait(), timer.remainingMs())
-                : timer.remainingMs();
+        pollForFetchesCount++;
+        long curTime = time.milliseconds();
+        try {
+            long pollTimeout = isCommittedOffsetsManagementEnabled()
+                    ? Math.min(applicationEventHandler.maximumTimeToWait(), timer.remainingMs())
+                    : timer.remainingMs();
 
-        // if data is available already, return it immediately
-        final Fetch<K, V> fetch = collectFetch();
-        if (!fetch.isEmpty()) {
-            return fetch;
-        }
+            // if data is available already, return it immediately
+            final Fetch<K, V> fetch = collectFetch();
+            if (!fetch.isEmpty()) {
+                return fetch;
+            }
 
-        // With the non-blocking poll design, it's possible that at this point the background thread is
-        // concurrently working to update positions. Therefore, a _copy_ of the current assignment is retrieved
-        // and iterated looking for any partitions with invalid positions. This is done to avoid being stuck
-        // in poll for an unnecessarily long amount of time if we are missing some positions since the offset
-        // lookup may be backing off after a failure.
-        if (pollTimeout > retryBackoffMs) {
-            Set<TopicPartition> partitions = subscriptions.assignedPartitions();
+            // With the non-blocking poll design, it's possible that at this point the background thread is
+            // concurrently working to update positions. Therefore, a _copy_ of the current assignment is retrieved
+            // and iterated looking for any partitions with invalid positions. This is done to avoid being stuck
+            // in poll for an unnecessarily long amount of time if we are missing some positions since the offset
+            // lookup may be backing off after a failure.
+            if (pollTimeout > retryBackoffMs) {
+                Set<TopicPartition> partitions = subscriptions.assignedPartitions();
 
-            if (partitions.isEmpty()) {
-                // If there aren't any assigned partitions, this could mean that this consumer's group membership
-                // has not been established or assignments have been removed and not yet reassigned. In either case,
-                // reduce the poll time for the fetch buffer wait.
-                pollTimeout = retryBackoffMs;
-            } else {
-                for (TopicPartition tp : partitions) {
-                    if (!subscriptions.hasValidPosition(tp)) {
-                        pollTimeout = retryBackoffMs;
-                        break;
+                if (partitions.isEmpty()) {
+                    // If there aren't any assigned partitions, this could mean that this consumer's group membership
+                    // has not been established or assignments have been removed and not yet reassigned. In either case,
+                    // reduce the poll time for the fetch buffer wait.
+                    pollTimeout = retryBackoffMs;
+                } else {
+                    for (TopicPartition tp : partitions) {
+                        if (!subscriptions.hasValidPosition(tp)) {
+                            pollTimeout = retryBackoffMs;
+                            break;
+                        }
                     }
                 }
             }
+
+            log.trace("Polling for fetches with timeout {}", pollTimeout);
+
+            Timer pollTimer = time.timer(pollTimeout);
+            wakeupTrigger.setFetchAction(fetchBuffer);
+
+            // Wait a bit for some fetched data to arrive, as there may not be anything immediately available. Note the
+            // use of a shorter, dedicated "pollTimer" here which updates "timer" so that calling method (poll) will
+            // correctly handle the overall timeout.
+            pollBlockCount++;
+            long blockCurTime = time.milliseconds();
+            try {
+                fetchBuffer.awaitWakeup(pollTimer);
+            } catch (InterruptException e) {
+                log.trace("Interrupt during fetch", e);
+                throw e;
+            } finally {
+                timer.update(pollTimer.currentTimeMs());
+                wakeupTrigger.clearTask();
+                long blockEndTime = time.milliseconds();
+                pollBlockTimeMs += blockEndTime - blockCurTime;
+            }
+
+            return collectFetch();
         }
-
-        log.trace("Polling for fetches with timeout {}", pollTimeout);
-
-        Timer pollTimer = time.timer(pollTimeout);
-        wakeupTrigger.setFetchAction(fetchBuffer);
-
-        // Wait a bit for some fetched data to arrive, as there may not be anything immediately available. Note the
-        // use of a shorter, dedicated "pollTimer" here which updates "timer" so that calling method (poll) will
-        // correctly handle the overall timeout.
-        try {
-            fetchBuffer.awaitWakeup(pollTimer);
-        } catch (InterruptException e) {
-            log.trace("Interrupt during fetch", e);
-            throw e;
-        } finally {
-            timer.update(pollTimer.currentTimeMs());
-            wakeupTrigger.clearTask();
+        finally {
+            long endTime = time.milliseconds();
+            pollForFetchesTimeMs +=  endTime - curTime;
         }
-
-        return collectFetch();
     }
 
     /**
@@ -1927,9 +1953,9 @@ public class AsyncKafkaConsumer<K, V> implements ConsumerDelegate<K, V> {
         // thread has not completed that stage for the inflight event, don't attempt to collect data from the fetch
         // buffer. If the inflight event was nulled out by checkInflightPoll(), that implies that it is safe to
         // attempt to collect data from the fetch buffer.
-        if (inflightPoll != null && !inflightPoll.isValidatePositionsComplete()) {
-            return Fetch.empty();
-        }
+//        if (inflightPoll != null && !inflightPoll.isValidatePositionsComplete()) {
+//            return Fetch.empty();
+//        }
 
         return fetchCollector.collectFetch(fetchBuffer);
     }

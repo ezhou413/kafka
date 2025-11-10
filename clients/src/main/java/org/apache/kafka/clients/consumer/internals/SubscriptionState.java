@@ -638,8 +638,8 @@ public class SubscriptionState {
 
     public synchronized Long partitionLag(TopicPartition tp, IsolationLevel isolationLevel) {
         TopicPartitionState topicPartitionState = assignedState(tp);
-        log.debug("isolation level: {}, LSO: {}, HWM: {}, offset: {}",
-                isolationLevel, topicPartitionState.lastStableOffset, topicPartitionState.highWatermark, topicPartitionState.position.offset);
+//        log.debug("isolation level: {}, LSO: {}, HWM: {}, offset: {}",
+//                isolationLevel, topicPartitionState.lastStableOffset, topicPartitionState.highWatermark, topicPartitionState.position.offset);
         if (topicPartitionState.position == null) {
             return null;
         } else if (isolationLevel == IsolationLevel.READ_COMMITTED) {
@@ -674,14 +674,14 @@ public class SubscriptionState {
     }
 
     synchronized void updateHighWatermark(TopicPartition tp, long highWatermark) {
-        log.debug("updateHWM - time: {} HWM: {}", System.currentTimeMillis(), highWatermark);
+//        log.debug("updateHWM - time: {} HWM: {}", System.currentTimeMillis(), highWatermark);
         assignedState(tp).highWatermark(highWatermark);
     }
 
     synchronized boolean tryUpdatingHighWatermark(TopicPartition tp, long highWatermark) {
         final TopicPartitionState state = assignedStateOrNull(tp);
         if (state != null) {
-            log.debug("tryUpdatingHWM - time: {} HWM: {}", System.currentTimeMillis(), highWatermark);
+//            log.debug("tryUpdatingHWM - time: {} HWM: {}", System.currentTimeMillis(), highWatermark);
             assignedState(tp).highWatermark(highWatermark);
             return true;
         }
@@ -698,14 +698,14 @@ public class SubscriptionState {
     }
 
     synchronized void updateLastStableOffset(TopicPartition tp, long lastStableOffset) {
-        log.debug("updateLSO - time: {} LSO: {}", System.currentTimeMillis(), lastStableOffset);
+//        log.debug("updateLSO - time: {} LSO: {}", System.currentTimeMillis(), lastStableOffset);
         assignedState(tp).lastStableOffset(lastStableOffset);
     }
 
     synchronized boolean tryUpdatingLastStableOffset(TopicPartition tp, long lastStableOffset) {
         final TopicPartitionState state = assignedStateOrNull(tp);
         if (state != null) {
-            log.debug("tryUpdatingLSO - time: {} LSO: {}", System.currentTimeMillis(), lastStableOffset);
+//            log.debug("tryUpdatingLSO - time: {} LSO: {}", System.currentTimeMillis(), lastStableOffset);
             assignedState(tp).lastStableOffset(lastStableOffset);
             return true;
         }

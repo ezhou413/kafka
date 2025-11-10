@@ -31,4 +31,4 @@ Configuration:
         - ref: STDERR
     Logger:
       - name: org.apache.kafka.clients.consumer.internals
-        level: DEBUG
+        level: ERROR
