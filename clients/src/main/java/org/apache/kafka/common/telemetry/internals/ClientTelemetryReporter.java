@@ -59,6 +59,7 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import io.opentelemetry.proto.metrics.v1.Metric;
 import io.opentelemetry.proto.metrics.v1.MetricsData;
@@ -715,7 +716,41 @@ public class ClientTelemetryReporter implements MetricsReporter {
             try (MetricsEmitter emitter = new ClientTelemetryEmitter(localSubscription.selector(), localSubscription.deltaTemporality())) {
                 emitter.init();
                 kafkaMetricsCollector.collect(emitter);
+                List<String> emittedMetricNames = emitter.emittedMetrics().stream().map(spm -> spm.key().name()).collect(Collectors.toList());
+                System.out.printf("Emitted metrics: %s for subscription %s%n", emittedMetricNames, localSubscription);
                 payload = createPayload(emitter.emittedMetrics());
+
+                // Print client_state and thread_state metrics
+                payload.getResourceMetricsList().stream()
+                    .flatMap(rm -> rm.getScopeMetricsList().stream())
+                    .flatMap(sm -> sm.getMetricsList().stream())
+                    .filter(metric -> "org.apache.kafka.stream.client.state".equals(metric.getName()) || "org.apache.kafka.stream.thread.thread.state".equals(metric.getName()))
+                    .forEach(metric -> {
+                        if (metric.hasGauge()) {
+                            metric.getGauge().getDataPointsList().forEach(dp -> {
+                                String attributes = dp.getAttributesList().stream()
+                                    .map(attr -> attr.getKey() + "=" + attr.getValue().getStringValue())
+                                    .collect(Collectors.joining(", "));
+                                System.out.printf("@@CLIENT|THREAD STATE Metric: %s, Value: %s, Attributes: [%s]%n",
+                                    metric.getName(),
+                                    dp.hasAsInt() ? dp.getAsInt() : dp.getAsDouble(),
+                                    attributes);
+                            });
+                        }
+                    });
+
+                Set<String> keys =  payload.getResourceMetricsList()
+                        .stream()
+                        .flatMap(rm -> rm.getScopeMetricsList().stream())
+                        .flatMap(sm -> sm.getMetricsList().stream())
+                        .map( metric-> metric.getGauge())
+                        .flatMap(gauge -> gauge.getDataPointsList().stream())
+                        .flatMap(numberDataPoint -> numberDataPoint.getAttributesList().stream())
+                        .map(attr -> attr.getKey()+":"+attr.getValue())
+                        .collect(Collectors.toSet());
+                if (!keys.isEmpty()) {
+                    System.out.printf("Resource labels %s%n", keys);
+                }
             } catch (Exception e) {
                 log.warn("Error constructing client telemetry payload: ", e);
                 // Update last accessed time for push request to be retried on next interval.
