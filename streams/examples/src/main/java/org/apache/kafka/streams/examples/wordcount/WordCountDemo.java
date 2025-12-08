@@ -261,7 +261,6 @@ public final class WordCountDemo {
             });
 
             try {
-                streams.cleanUp();
                 streams.start();
                 Thread.sleep(60_000L);
                 ClientInstanceIds clientInstanceIds = streams.clientInstanceIds(Duration.ofSeconds(360));
