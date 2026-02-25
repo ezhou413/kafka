@@ -67,7 +67,7 @@ public final class WordCountDemo {
 
     public static final String INPUT_TOPIC = "input";
     public static final String OUTPUT_TOPIC = "output";
-    public static final String GLOBAL_TOPIC = "globalV2";
+    public static final String GLOBAL_TOPIC = "globalV3";
     private static final Logger LOG = LoggerFactory.getLogger(WordCountDemo.class);
 
     static Properties streamsConfig(final String[] args) throws IOException {
@@ -94,7 +94,7 @@ public final class WordCountDemo {
         props.putIfAbsent(StreamsConfig.ENABLE_METRICS_PUSH_CONFIG, true);
         props.putIfAbsent(StreamsConfig.NUM_STREAM_THREADS_CONFIG, 3);
         props.putIfAbsent(StreamsConfig.topicPrefix("retention.ms"), 3600000);
-       // props.putIfAbsent(StreamsConfig.GROUP_PROTOCOL_CONFIG, "streams");
+        props.putIfAbsent(StreamsConfig.GROUP_PROTOCOL_CONFIG, "classic");
 
         // setting offset reset to earliest so that we can re-run the demo code with the same pre-loaded data
         // Note: To re-run the demo, you need to use the offset reset tool:
@@ -131,36 +131,6 @@ public final class WordCountDemo {
 
     public static void main(final String[] args) throws IOException, ExecutionException, InterruptedException {
             final Properties props = streamsConfig(args);
-
-            try (Admin admin = Admin.create(props)) {
-                final Set<String> existingTopics = admin.listTopics().names().get();
-
-                final List<NewTopic> topicsToCreate = new ArrayList<>();
-                if (!existingTopics.contains(INPUT_TOPIC)) {
-                    topicsToCreate.add(new NewTopic(INPUT_TOPIC, 6, (short) 6));
-                } else {
-                    LOG.info("Found existing input topic: {}", INPUT_TOPIC);
-                }
-
-                if (!existingTopics.contains(OUTPUT_TOPIC)) {
-                    topicsToCreate.add(new NewTopic(OUTPUT_TOPIC, 6, (short) 6));
-                } else {
-                    LOG.info("Found existing output topic: {}", OUTPUT_TOPIC);
-                }
-
-                if (!existingTopics.contains(GLOBAL_TOPIC)) {
-                    topicsToCreate.add(new NewTopic(GLOBAL_TOPIC, 6, (short) 6));
-                } else {
-                    LOG.info("Found existing global topic: {}", GLOBAL_TOPIC);
-                }
-
-                if (!topicsToCreate.isEmpty()) {
-                    admin.createTopics(topicsToCreate);
-                    LOG.info("Created topics: {}", topicsToCreate.stream()
-                            .map(NewTopic::name)
-                            .collect(Collectors.joining(", ")));
-                }
-            }
 
             // List of 100 Kafka phrases
             final List<String> kafkaWords = Arrays.asList(
@@ -262,6 +232,7 @@ public final class WordCountDemo {
             });
 
             try {
+                streams.cleanUp();
                 streams.start();
                 Thread.sleep(60_000L);
                 ClientInstanceIds clientInstanceIds = streams.clientInstanceIds(Duration.ofSeconds(360));

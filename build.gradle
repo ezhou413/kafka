@@ -3003,6 +3003,7 @@ project(':streams:examples') {
   dependencies {
     implementation project(':streams')
     implementation libs.slf4jApi
+    implementation libs.slf4jSimple
     implementation libs.jacksonDatabind
     implementation libs.jacksonAnnotations
 

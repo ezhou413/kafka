@@ -57,7 +57,7 @@ public class WordCountDemoTest {
     public void setup() throws IOException {
         final StreamsBuilder builder = new StreamsBuilder();
         //Create Actual Stream Processing pipeline
-        WordCountDemo.createWordCountStream(builder);
+        WordCountDemo.createWordCountStream(builder, null, null);
         testDriver = new TopologyTestDriver(builder.build(), WordCountDemo.streamsConfig(null));
         inputTopic = testDriver.createInputTopic(WordCountDemo.INPUT_TOPIC, new StringSerializer(), new StringSerializer());
         outputTopic = testDriver.createOutputTopic(WordCountDemo.OUTPUT_TOPIC, new StringDeserializer(), new LongDeserializer());

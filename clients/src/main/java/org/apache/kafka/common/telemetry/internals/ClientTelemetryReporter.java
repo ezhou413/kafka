@@ -717,7 +717,7 @@ public class ClientTelemetryReporter implements MetricsReporter {
                 emitter.init();
                 kafkaMetricsCollector.collect(emitter);
                 List<String> emittedMetricNames = emitter.emittedMetrics().stream().map(spm -> spm.key().name()).collect(Collectors.toList());
-                System.out.printf("Emitted metrics: %s for subscription %s%n", emittedMetricNames, localSubscription);
+                log.info("Emitted metrics: {} for subscription {}", emittedMetricNames, localSubscription);
                 payload = createPayload(emitter.emittedMetrics());
 
                 // Print client_state and thread_state metrics
@@ -731,7 +731,7 @@ public class ClientTelemetryReporter implements MetricsReporter {
                                 String attributes = dp.getAttributesList().stream()
                                     .map(attr -> attr.getKey() + "=" + attr.getValue().getStringValue())
                                     .collect(Collectors.joining(", "));
-                                System.out.printf("@@CLIENT|THREAD STATE Metric: %s, Value: %s, Attributes: [%s]%n",
+                                log.info("@@CLIENT|THREAD STATE Metric: {}, Value: {}, Attributes: [{}]",
                                     metric.getName(),
                                     dp.hasAsInt() ? dp.getAsInt() : dp.getAsDouble(),
                                     attributes);
@@ -749,7 +749,7 @@ public class ClientTelemetryReporter implements MetricsReporter {
                         .map(attr -> attr.getKey()+":"+attr.getValue())
                         .collect(Collectors.toSet());
                 if (!keys.isEmpty()) {
-                    System.out.printf("Resource labels %s%n", keys);
+                    log.info("Resource labels {}", keys);
                 }
             } catch (Exception e) {
                 log.warn("Error constructing client telemetry payload: ", e);
