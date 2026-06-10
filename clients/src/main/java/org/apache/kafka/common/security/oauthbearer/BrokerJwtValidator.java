@@ -74,6 +74,12 @@ import static org.jose4j.jwa.AlgorithmConstraints.DISALLOW_NONE;
  *         Signature matching validation against the <code>kid</code> and those provided by
  *         the OAuth/OIDC provider's JWKS
  *     </li>
+ *     <li>
+ *         Validation of the <code>iss</code> (issuer) claim when {@code sasl.oauthbearer.expected.issuer} is
+ *         configured (strongly recommended); the token's <code>iss</code> claim is matched exactly against that
+ *         value. If the expected issuer is not configured, the issuer is not verified and a token bearing any
+ *         (or no) issuer is accepted, so a warning is logged at startup.
+ *     </li>
  * </ol>
  */
 public class BrokerJwtValidator implements JwtValidator {
@@ -123,8 +129,16 @@ public class BrokerJwtValidator implements JwtValidator {
         if (!expectedAudiences.isEmpty())
             jwtConsumerBuilder.setExpectedAudience(expectedAudiences.toArray(new String[0]));
 
-        if (expectedIssuer != null)
+        if (expectedIssuer != null) {
             jwtConsumerBuilder.setExpectedIssuer(expectedIssuer);
+        } else {
+            // Strongly recommended but not required. Without an expected issuer, jose4j accepts a token bearing any
+            // or no "iss" claim, so the broker cannot verify which issuer minted the token. Warn loudly at startup.
+            log.warn("The OAuth broker validator is configured with a JWKS endpoint but without \"{}\", so it will accept" +
+                " a JWT bearing any (or no) \"iss\" (issuer) claim. This is strongly discouraged; set \"{}\" to the issuer" +
+                " URL of your OAuth/OIDC provider so that the token issuer is verified.",
+                SASL_OAUTHBEARER_EXPECTED_ISSUER, SASL_OAUTHBEARER_EXPECTED_ISSUER);
+        }
 
         this.jwtConsumer = jwtConsumerBuilder
             .setJwsAlgorithmConstraints(DISALLOW_NONE)
