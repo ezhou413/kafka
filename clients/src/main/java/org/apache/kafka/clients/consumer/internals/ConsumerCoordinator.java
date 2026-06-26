@@ -1619,7 +1619,30 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         }
 
         boolean matches(MetadataSnapshot other) {
-            return version == other.version || partitionsPerTopic.equals(other.partitionsPerTopic);
+            if (version == other.version)
+                return true;
+
+            // A rebalance is only required if the metadata changed in a way that could change the
+            // assignment: a subscribed topic was added/removed, a topic's partition count changed,
+            // or a partition gained a replica in a rack that did not previously have one. Racks
+            // disappearing (e.g. a broker going offline during a rolling restart, which makes its
+            // replicas' racks unknown) are deliberately ignored to avoid spurious rebalances: the
+            // replica is expected to rejoin, the built-in rack-aware assignors ignore unknown racks
+            // anyway, and follower fetching continues to serve reads. See PartitionRackInfo#noNewRacks.
+            if (!partitionsPerTopic.keySet().equals(other.partitionsPerTopic.keySet()))
+                return false;
+
+            for (Map.Entry<String, List<PartitionRackInfo>> entry : partitionsPerTopic.entrySet()) {
+                List<PartitionRackInfo> assignmentRacks = entry.getValue();
+                List<PartitionRackInfo> currentRacks = other.partitionsPerTopic.get(entry.getKey());
+                if (currentRacks.size() != assignmentRacks.size())
+                    return false;
+                for (int i = 0; i < assignmentRacks.size(); i++) {
+                    if (!assignmentRacks.get(i).noNewRacks(currentRacks.get(i)))
+                        return false;
+                }
+            }
+            return true;
         }
 
         @Override
@@ -1660,27 +1683,28 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         PartitionRackInfo(Optional<String> clientRack, PartitionInfo partition) {
             if (clientRack.isPresent() && partition.replicas() != null) {
-                racks = Arrays.stream(partition.replicas()).map(Node::rack).collect(Collectors.toSet());
+                // Ignore replicas whose rack is unknown. This happens when the broker hosting a
+                // replica is temporarily unavailable (e.g. during a rolling restart) and is missing
+                // from the metadata, so the replica resolves to a node with a null rack. The
+                // rack-aware assignors filter these out as well, so tracking them here would only
+                // produce spurious rebalances that recompute the same assignment.
+                racks = Arrays.stream(partition.replicas())
+                        .map(Node::rack)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
             } else {
                 racks = Collections.emptySet();
             }
         }
 
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (!(o instanceof PartitionRackInfo)) {
-                return false;
-            }
-            PartitionRackInfo rackInfo = (PartitionRackInfo) o;
-            return Objects.equals(racks, rackInfo.racks);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(racks);
+        /**
+         * Returns true if {@code current} does not introduce any rack that was not already present
+         * in this (assignment-time) snapshot. A rack disappearing is treated as transient (the
+         * replica is expected to rejoin) and does not require a rebalance; only a newly added rack
+         * indicates a topology change that could improve assignment locality and warrants one.
+         */
+        boolean noNewRacks(PartitionRackInfo current) {
+            return racks.containsAll(current.racks);
         }
 
         @Override

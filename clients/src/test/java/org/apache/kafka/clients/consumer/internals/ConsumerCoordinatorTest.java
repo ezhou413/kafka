@@ -1507,10 +1507,24 @@ public abstract class ConsumerCoordinatorTest {
 
     @Test
     public void testRackAwareConsumerRebalanceWithLessRacks() {
+        // A partition losing a rack (here the third partition drops its rack-a replica) does not
+        // trigger a rebalance: a rack disappearing is treated as transient (e.g. a broker offline
+        // during a roll), so we avoid churn and wait for it to rejoin rather than reassigning.
         verifyRackAwareConsumerRebalance(
                 Arrays.asList(Arrays.asList(0, 1), Arrays.asList(1, 2), Arrays.asList(2, 0)),
                 Arrays.asList(Arrays.asList(0, 1), Arrays.asList(1, 2), Collections.singletonList(2)),
-                true, true);
+                true, false);
+    }
+
+    @Test
+    public void testRackAwareConsumerRebalanceWithUnavailableRack() {
+        // A replica whose broker is offline (node id 6 is not among the live brokers, so it resolves
+        // to a null rack) must not trigger a rebalance, even though the partition's known racks
+        // shrink from {rack-a, rack-b} to {rack-b}. This is the broker-roll scenario from the field.
+        verifyRackAwareConsumerRebalance(
+                Arrays.asList(Arrays.asList(0, 1), Arrays.asList(1, 2), Arrays.asList(2, 0)),
+                Arrays.asList(Arrays.asList(1, 6), Arrays.asList(1, 2), Arrays.asList(2, 0)),
+                true, false);
     }
 
     @Test
