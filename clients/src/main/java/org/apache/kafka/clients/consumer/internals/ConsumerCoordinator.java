@@ -229,7 +229,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         this.log = logContext.logger(ConsumerCoordinator.class);
         this.metadata = metadata;
         this.rackId = rebalanceConfig.rackId;
-        this.metadataSnapshot = new MetadataSnapshot(this.rackId, subscriptions, metadata.fetch(), metadata.updateVersion());
+        this.metadataSnapshot = new MetadataSnapshot(this.rackId, subscriptions, metadata.fetch(), metadata.updateVersion(), log);
         this.subscriptions = subscriptions;
         this.defaultOffsetCommitCallback = new DefaultOffsetCommitCallback();
         this.autoCommitEnabled = autoCommitEnabled;
@@ -487,7 +487,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
             // Update the current snapshot, which will be used to check for subscription
             // changes that would require a rebalance (e.g. new partitions).
-            metadataSnapshot = new MetadataSnapshot(rackId, subscriptions, cluster, version);
+            metadataSnapshot = new MetadataSnapshot(rackId, subscriptions, cluster, version, log);
         }
     }
 
@@ -1603,13 +1603,13 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         private final int version;
         private final Map<String, List<PartitionRackInfo>> partitionsPerTopic;
 
-        private MetadataSnapshot(Optional<String> clientRack, SubscriptionState subscription, Cluster cluster, int version) {
+        private MetadataSnapshot(Optional<String> clientRack, SubscriptionState subscription, Cluster cluster, int version, Logger log) {
             Map<String, List<PartitionRackInfo>> partitionsPerTopic = new HashMap<>();
             for (String topic : subscription.metadataTopics()) {
                 List<PartitionInfo> partitions = cluster.partitionsForTopic(topic);
                 if (partitions != null) {
                     List<PartitionRackInfo> partitionRacks = partitions.stream()
-                            .map(p -> new PartitionRackInfo(clientRack, p))
+                            .map(p -> new PartitionRackInfo(clientRack, p, log))
                             .collect(Collectors.toList());
                     partitionsPerTopic.put(topic, partitionRacks);
                 }
@@ -1658,11 +1658,27 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     private static class PartitionRackInfo {
         private final Set<String> racks;
 
-        PartitionRackInfo(Optional<String> clientRack, PartitionInfo partition) {
+        PartitionRackInfo(Optional<String> clientRack, PartitionInfo partition, Logger log) {
             if (clientRack.isPresent() && partition.replicas() != null) {
                 racks = Arrays.stream(partition.replicas()).map(Node::rack).collect(Collectors.toSet());
             } else {
                 racks = Collections.emptySet();
+            }
+            // [RACK-REPRO] Demonstration-only logging (not for production). Shows the replica Nodes
+            // received from metadata and the rack Set built from them. When a broker is temporarily
+            // unavailable (e.g. during a rolling restart) it drops out of the metadata broker list,
+            // so its replica resolves to Node(host="", port=-1, rack=null) -> isEmpty()==true and
+            // rack()==null. That null rack is included in the Set here, so the Set changes (and
+            // changes back when the broker returns), which makes MetadataSnapshot#matches treat it as
+            // a topology change and trigger a rejoin each time.
+            if (clientRack.isPresent() && log.isInfoEnabled()) {
+                List<String> replicaNodes = partition.replicas() == null ? Collections.emptyList()
+                        : Arrays.stream(partition.replicas())
+                                .map(n -> String.format("Node(id=%d, host='%s', rack=%s, isEmpty=%b)",
+                                        n.id(), n.host(), n.rack(), n.isEmpty()))
+                                .collect(Collectors.toList());
+                log.info("[RACK-REPRO] build racks for {}-{}: replicas={} -> racks={}",
+                        partition.topic(), partition.partition(), replicaNodes, racks);
             }
         }
 

@@ -18,7 +18,7 @@ package kafka.server
 
 import kafka.utils.{TestInfoUtils, TestUtils}
 import org.apache.kafka.clients.admin.NewPartitionReassignment
-import org.apache.kafka.clients.consumer.{ConsumerConfig, KafkaConsumer, RangeAssignor}
+import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRebalanceListener, KafkaConsumer, RangeAssignor}
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
@@ -31,9 +31,11 @@ import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.{MethodSource, ValueSource}
 
+import java.time.Duration
 import java.util
 import java.util.Properties
-import java.util.concurrent.{Executors, TimeUnit}
+import java.util.concurrent.{ConcurrentLinkedQueue, Executors, TimeUnit}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.jdk.CollectionConverters._
 
 class FetchFromFollowerIntegrationTest extends BaseFetchRequestTest {
@@ -265,6 +267,132 @@ class FetchFromFollowerIntegrationTest extends BaseFetchRequestTest {
 
     } finally {
       executor.shutdownNow()
+    }
+  }
+
+  /**
+   * Demonstrates the spurious-rebalance behavior introduced by KAFKA-14867 / KIP-881 on the classic
+   * consumer protocol. In a multi-rack, rack-aware cluster (client.rack configured), a SINGLE broker
+   * bounce causes TWO rebalances:
+   *   - one when the broker goes down: its replicas drop out of the live-broker list, so they resolve
+   *     to Node(host="", rack=null) and the rack Set tracked by ConsumerCoordinator.MetadataSnapshot
+   *     changes, which is treated as a metadata change and triggers a rejoin;
+   *   - one when it comes back: the rack reappears, the Set changes again, and we rejoin again.
+   *
+   * Run with INFO logging and grep for "[RACK-REPRO]" to see the replicas received from metadata and
+   * the rack Set being built, alongside the "Request joining group due to: cached metadata has
+   * changed ..." lines emitted when the rejoin is requested.
+   */
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedGroupProtocolNames)
+  @ValueSource(strings = Array("classic"))
+  @Timeout(120)
+  def testBrokerBounceCausesTwoRebalancesWithRackAwareConsumer(groupProtocol: String): Unit = {
+    val rackTopic = "rack-bounce-topic"
+    val rackTopicPartition = new TopicPartition(rackTopic, 0)
+    val groupId = "rack-bounce-group"
+
+    val admin = createAdminClient()
+    // One partition replicated on BOTH brokers. enableFetchFromFollower sets broker.rack = broker id,
+    // so the healthy replica rack Set for this partition is {"0", "1"}.
+    TestUtils.createTopicWithAdmin(
+      admin,
+      rackTopic,
+      brokers,
+      controllerServers,
+      replicaAssignment = Map(0 -> Seq(leaderBrokerId, followerBrokerId))
+    )
+    TestUtils.waitUntilLeaderIsKnown(brokers, rackTopicPartition)
+
+    val assignedCount = new AtomicInteger(0)
+    val events = new ConcurrentLinkedQueue[String]()
+    def record(msg: String): Unit = {
+      events.add(msg)
+      println(msg)
+    }
+
+    val consumerProps = new Properties
+    consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers())
+    consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId)
+    consumerProps.put(ConsumerConfig.GROUP_PROTOCOL_CONFIG, groupProtocol)
+    consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+    consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false")
+    consumerProps.put(ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG, classOf[RangeAssignor].getName)
+    // Rack-aware: this is what makes MetadataSnapshot track replica racks. The value only needs to be
+    // present; it does not affect whether the rack Set changes when some broker bounces.
+    consumerProps.put(ConsumerConfig.CLIENT_RACK_CONFIG, leaderBrokerId.toString)
+    // Refresh metadata quickly so the consumer notices the rack change soon after the bounce.
+    consumerProps.put(ConsumerConfig.METADATA_MAX_AGE_CONFIG, "1000")
+    val consumer = new KafkaConsumer(consumerProps, new ByteArrayDeserializer, new ByteArrayDeserializer)
+
+    val listener = new ConsumerRebalanceListener {
+      override def onPartitionsAssigned(partitions: util.Collection[TopicPartition]): Unit =
+        record(s"[RACK-REPRO] onPartitionsAssigned #${assignedCount.incrementAndGet()} -> $partitions")
+      override def onPartitionsRevoked(partitions: util.Collection[TopicPartition]): Unit =
+        record(s"[RACK-REPRO] onPartitionsRevoked -> $partitions")
+    }
+
+    val keepPolling = new AtomicBoolean(true)
+    val pollThread = new Thread(() => {
+      while (keepPolling.get()) {
+        try consumer.poll(Duration.ofMillis(100))
+        catch { case e: Exception => events.add(s"[RACK-REPRO] poll exception: $e") }
+      }
+    }, "rack-repro-poll-thread")
+
+    try {
+      consumer.subscribe(util.List.of(rackTopic), listener)
+      pollThread.start()
+
+      // Initial join/assignment - this is the baseline, not part of the bounce.
+      TestUtils.waitUntilTrue(() => assignedCount.get >= 1,
+        "Consumer never received its initial assignment", waitTimeMs = 30000)
+      val baseline = assignedCount.get
+      record(s"[RACK-REPRO] baseline assignment count after initial join = $baseline")
+
+      // Find the group coordinator and bounce the OTHER broker, so the consumer keeps its coordinator
+      // throughout and the only relevant metadata change is the replica's rack going null/non-null.
+      var coordinatorId = -1
+      TestUtils.waitUntilTrue(() => {
+        try {
+          coordinatorId = admin.describeConsumerGroups(util.List.of(groupId))
+            .describedGroups().get(groupId).get(30, TimeUnit.SECONDS).coordinator().id()
+          coordinatorId >= 0
+        } catch { case _: Exception => false }
+      }, "Group coordinator was not assigned", waitTimeMs = 30000)
+      val bounceBrokerId = if (coordinatorId == leaderBrokerId) followerBrokerId else leaderBrokerId
+      record(s"[RACK-REPRO] group coordinator is broker $coordinatorId; bouncing broker $bounceBrokerId " +
+        s"(a replica of $rackTopic, leaving the coordinator untouched)")
+
+      // ---- DOWN: the replica's rack becomes null -> rack Set changes -> rejoin ----
+      record(s"[RACK-REPRO] >>> shutting down broker $bounceBrokerId")
+      brokers(bounceBrokerId).shutdown()
+      TestUtils.waitUntilTrue(() => assignedCount.get >= baseline + 1,
+        s"Consumer did not rebalance after broker $bounceBrokerId went down", waitTimeMs = 90000)
+      val afterDown = assignedCount.get
+      record(s"[RACK-REPRO] assignment count after broker went DOWN = $afterDown")
+
+      // ---- UP: the rack reappears -> rack Set changes again -> rejoin again ----
+      record(s"[RACK-REPRO] >>> starting broker $bounceBrokerId")
+      brokers(bounceBrokerId).startup()
+      TestUtils.waitUntilTrue(() => assignedCount.get >= afterDown + 1,
+        s"Consumer did not rebalance after broker $bounceBrokerId came back", waitTimeMs = 90000)
+      val afterUp = assignedCount.get
+      record(s"[RACK-REPRO] assignment count after broker came UP = $afterUp")
+
+      keepPolling.set(false)
+      pollThread.join(TimeUnit.SECONDS.toMillis(10))
+
+      val bounceRebalances = afterUp - baseline
+      record(s"[RACK-REPRO] ===== a single bounce of broker $bounceBrokerId produced " +
+        s"$bounceRebalances rebalance(s) =====")
+
+      assertTrue(bounceRebalances >= 2,
+        s"Expected a single broker bounce to cause at least 2 rebalances (one on shutdown, one on " +
+          s"startup) on trunk, but observed $bounceRebalances. Timeline:\n${events.asScala.mkString("\n")}")
+    } finally {
+      keepPolling.set(false)
+      pollThread.join(TimeUnit.SECONDS.toMillis(10))
+      consumer.close()
     }
   }
 

@@ -36,3 +36,11 @@ Configuration:
 
       - name: org.apache.kafka
         level: WARN
+
+      # [RACK-REPRO] Surface the rack-Set building logs and the rejoin-trigger reason for the
+      # broker-bounce demonstration test (testBrokerBounceCausesTwoRebalancesWithRackAwareConsumer).
+      - name: org.apache.kafka.clients.consumer.internals.ConsumerCoordinator
+        level: INFO
+
+      - name: org.apache.kafka.clients.consumer.internals.AbstractCoordinator
+        level: INFO
